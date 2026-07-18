@@ -22,6 +22,7 @@ import json
 import mimetypes
 import os
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,40 @@ from requests.auth import HTTPBasicAuth
 
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm", ".m4v"}
+MOJIBAKE_MARKERS = ("Ã", "Â", "â€", "â€™", "â€œ", "â€�", "â€“", "â€”")
+MOJIBAKE_REPLACEMENTS = {
+    "â€™": "'",
+    "â€˜": "'",
+    "â€œ": '"',
+    "â€�": '"',
+    "â€“": "-",
+    "â€”": "-",
+    "â€¦": "...",
+    "Â ": " ",
+    "Â": "",
+}
+
+
+def fix_text_encoding(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+
+    text = value
+    if any(marker in text for marker in MOJIBAKE_MARKERS):
+        try:
+            text = text.encode("cp1252").decode("utf-8")
+        except UnicodeError:
+            pass
+
+    for bad, good in MOJIBAKE_REPLACEMENTS.items():
+        text = text.replace(bad, good)
+
+    return text
+
+
+def clean_row_text(row: dict[str, str]) -> dict[str, str]:
+    return {fix_text_encoding(key): fix_text_encoding(value).strip() for key, value in row.items()}
 
 
 @dataclass
@@ -91,7 +126,7 @@ def read_products(csv_path: Path) -> list[dict[str, str]]:
 
     with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
-        rows = [{key: (value or "").strip() for key, value in row.items()} for row in reader]
+        rows = [clean_row_text({key: value or "" for key, value in row.items()}) for row in reader]
 
     if not rows:
         raise SystemExit(f"Le CSV est vide : {csv_path}")
@@ -117,6 +152,19 @@ def find_images(images_root: Path, folder_name: str) -> list[Path]:
     return sorted(images, key=lambda path: path.name.lower())
 
 
+def find_videos(images_root: Path, folder_name: str) -> list[Path]:
+    folder = images_root / folder_name
+    if not folder.exists():
+        return []
+
+    videos = [
+        path
+        for path in folder.iterdir()
+        if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS
+    ]
+    return sorted(videos, key=lambda path: path.name.lower())
+
+
 def request_json(response: requests.Response, context: str) -> Any:
     try:
         payload = response.json()
@@ -130,9 +178,41 @@ def request_json(response: requests.Response, context: str) -> Any:
     return payload
 
 
+def request_with_retries(
+    method: str,
+    url: str,
+    context: str,
+    retries: int,
+    retry_delay: float,
+    **kwargs: Any,
+) -> requests.Response:
+    retry_statuses = {429, 500, 502, 503, 504}
+    last_response: requests.Response | None = None
+
+    for attempt in range(1, retries + 2):
+        response = requests.request(method, url, **kwargs)
+        if response.status_code not in retry_statuses:
+            return response
+
+        last_response = response
+        if attempt <= retries:
+            wait_seconds = retry_delay * attempt
+            print(
+                f"  {context} temporairement indisponible "
+                f"[{response.status_code}], nouvel essai dans {wait_seconds:.0f}s..."
+            )
+            time.sleep(wait_seconds)
+
+    return last_response
+
+
 def wc_get(config: Config, endpoint: str, params: dict[str, Any] | None = None) -> Any:
-    response = requests.get(
+    response = request_with_retries(
+        "GET",
         urljoin(config.wc_api_base, endpoint),
+        f"GET WooCommerce {endpoint}",
+        retries=2,
+        retry_delay=2,
         auth=HTTPBasicAuth(config.wc_key, config.wc_secret),
         params=params,
         timeout=60,
@@ -141,13 +221,31 @@ def wc_get(config: Config, endpoint: str, params: dict[str, Any] | None = None) 
 
 
 def wc_post(config: Config, endpoint: str, payload: dict[str, Any]) -> Any:
-    response = requests.post(
+    response = request_with_retries(
+        "POST",
         urljoin(config.wc_api_base, endpoint),
+        f"POST WooCommerce {endpoint}",
+        retries=2,
+        retry_delay=2,
         auth=HTTPBasicAuth(config.wc_key, config.wc_secret),
         json=payload,
         timeout=60,
     )
     return request_json(response, f"POST WooCommerce {endpoint}")
+
+
+def wc_put(config: Config, endpoint: str, payload: dict[str, Any]) -> Any:
+    response = request_with_retries(
+        "PUT",
+        urljoin(config.wc_api_base, endpoint),
+        f"PUT WooCommerce {endpoint}",
+        retries=2,
+        retry_delay=2,
+        auth=HTTPBasicAuth(config.wc_key, config.wc_secret),
+        json=payload,
+        timeout=60,
+    )
+    return request_json(response, f"PUT WooCommerce {endpoint}")
 
 
 def find_product_by_sku(config: Config, sku: str) -> dict[str, Any] | None:
@@ -173,7 +271,13 @@ def ensure_category(config: Config, category_name: str, cache: dict[str, int]) -
     return cache[normalized]
 
 
-def upload_media(config: Config, image_path: Path, alt_text: str) -> dict[str, Any]:
+def upload_media(
+    config: Config,
+    image_path: Path,
+    alt_text: str,
+    retries: int,
+    retry_delay: float,
+) -> dict[str, Any]:
     if not config.wp_user or not config.wp_app_password:
         raise RuntimeError(
             "Images locales detectees, mais WORDPRESS_USER ou WORDPRESS_APP_PASSWORD est manquant."
@@ -185,14 +289,17 @@ def upload_media(config: Config, image_path: Path, alt_text: str) -> dict[str, A
         "Content-Type": mime_type,
     }
 
-    with image_path.open("rb") as handle:
-        response = requests.post(
-            urljoin(config.wp_api_base, "media"),
-            auth=HTTPBasicAuth(config.wp_user, config.wp_app_password),
-            headers=headers,
-            data=handle,
-            timeout=120,
-        )
+    response = request_with_retries(
+        "POST",
+        urljoin(config.wp_api_base, "media"),
+        f"Upload image {image_path.name}",
+        retries=retries,
+        retry_delay=retry_delay,
+        auth=HTTPBasicAuth(config.wp_user, config.wp_app_password),
+        headers=headers,
+        data=image_path.read_bytes(),
+        timeout=120,
+    )
 
     media = request_json(response, f"Upload image {image_path.name}")
 
@@ -225,6 +332,7 @@ def build_product_payload(
     row: dict[str, str],
     category_id: int,
     image_ids: list[int],
+    video_urls: list[str],
     publish: bool,
 ) -> dict[str, Any]:
     reference = row["reference"]
@@ -234,14 +342,19 @@ def build_product_payload(
     else:
         status = "draft"
 
+    description = fix_text_encoding(row.get("description", ""))
+    if video_urls:
+        video_html = build_video_description_html(video_urls)
+        description = f"{description}\n\n{video_html}" if description else video_html
+
     payload: dict[str, Any] = {
-        "name": row["nom"],
+        "name": fix_text_encoding(row["nom"]),
         "type": "simple",
         "status": status,
         "sku": reference,
         "regular_price": parse_price(row["prix"]),
-        "description": row.get("description", ""),
-        "short_description": row.get("description_courte", ""),
+        "description": description,
+        "short_description": fix_text_encoding(row.get("description_courte", "")),
         "categories": [{"id": category_id}],
         "manage_stock": True,
         "stock_quantity": parse_stock(row.get("stock", "1")),
@@ -257,7 +370,7 @@ def build_product_payload(
     ]:
         value = row.get(key, "")
         if value:
-            attributes.append({"name": name, "visible": True, "options": [value]})
+            attributes.append({"name": name, "visible": True, "options": [fix_text_encoding(value)]})
 
     if attributes:
         payload["attributes"] = attributes
@@ -265,11 +378,30 @@ def build_product_payload(
     return payload
 
 
+def build_video_description_html(video_urls: list[str]) -> str:
+    blocks = ["<h3>Video du produit</h3>"]
+    for url in video_urls:
+        escaped_url = (
+            url.replace("&", "&amp;")
+            .replace('"', "&quot;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
+        blocks.append(
+            '<video controls preload="metadata" style="width:100%;max-width:720px;height:auto;">'
+            f'<source src="{escaped_url}">'
+            "Votre navigateur ne peut pas lire cette video."
+            "</video>"
+        )
+    return "\n".join(blocks)
+
+
 def import_products(args: argparse.Namespace) -> int:
     config = load_config(args.env, allow_missing=not args.execute)
     products = read_products(args.csv)
     category_cache: dict[str, int] = {}
     created_count = 0
+    updated_count = 0
     skipped_count = 0
     failed_count = 0
 
@@ -283,6 +415,7 @@ def import_products(args: argparse.Namespace) -> int:
         reference = row.get("reference", f"ligne-{index}")
         try:
             images = [] if args.skip_images else find_images(args.images_root, row["dossier_images"])
+            videos = [] if args.skip_videos else find_videos(args.images_root, row["dossier_images"])
             print(f"[{index}/{len(products)}] {reference} - {row['nom']}")
 
             if args.execute:
@@ -296,20 +429,58 @@ def import_products(args: argparse.Namespace) -> int:
                     continue
 
                 category_id = ensure_category(config, row["categorie"], category_cache)
+                payload = build_product_payload(row, category_id, [], [], args.publish)
                 media_ids = []
-                for image_path in images:
-                    media = upload_media(config, image_path, row["nom"])
-                    media_ids.append(int(media["id"]))
-                    print(f"  image envoyee : {image_path.name} -> media #{media['id']}")
+                video_urls = []
 
-                payload = build_product_payload(row, category_id, media_ids, args.publish)
-                created = wc_post(config, "products", payload)
-                print(f"  produit cree : #{created['id']} ({created.get('status', 'draft')})")
-                created_count += 1
+                if existing and args.update_existing and args.keep_existing_images:
+                    media_ids = [int(image["id"]) for image in existing.get("images", []) if image.get("id")]
+                    print(f"  images conservees : {len(media_ids)}")
+                else:
+                    for image_path in images:
+                        media = upload_media(
+                            config,
+                            image_path,
+                            row["nom"],
+                            retries=args.upload_retries,
+                            retry_delay=args.retry_delay,
+                        )
+                        media_ids.append(int(media["id"]))
+                        print(f"  image envoyee : {image_path.name} -> media #{media['id']}")
+
+                for video_path in videos:
+                    media = upload_media(
+                        config,
+                        video_path,
+                        row["nom"],
+                        retries=args.upload_retries,
+                        retry_delay=args.retry_delay,
+                    )
+                    video_url = media.get("source_url")
+                    if video_url:
+                        video_urls.append(str(video_url))
+                    print(f"  video envoyee : {video_path.name} -> media #{media['id']}")
+
+                payload["images"] = [{"id": image_id} for image_id in media_ids]
+                if video_urls:
+                    description = fix_text_encoding(row.get("description", ""))
+                    video_html = build_video_description_html(video_urls)
+                    payload["description"] = f"{description}\n\n{video_html}" if description else video_html
+
+                if existing and args.update_existing:
+                    payload.pop("sku", None)
+                    updated = wc_put(config, f"products/{existing['id']}", payload)
+                    print(f"  produit mis a jour : #{updated['id']} ({updated.get('status', 'draft')})")
+                    updated_count += 1
+                else:
+                    created = wc_post(config, "products", payload)
+                    print(f"  produit cree : #{created['id']} ({created.get('status', 'draft')})")
+                    created_count += 1
             else:
                 print(f"  categorie : {row['categorie']}")
                 print(f"  prix : {row['prix']}")
                 print(f"  images trouvees : {len(images)}")
+                print(f"  videos trouvees : {len(videos)}")
                 print("  aucune creation : dry-run")
 
         except Exception as exc:
@@ -317,7 +488,10 @@ def import_products(args: argparse.Namespace) -> int:
             print(f"  ERREUR {reference} : {exc}", file=sys.stderr)
 
     print("")
-    print(f"Termine. Produits crees : {created_count}. Ignorés : {skipped_count}. Erreurs : {failed_count}.")
+    print(
+        f"Termine. Produits crees : {created_count}. "
+        f"Mis a jour : {updated_count}. Ignorés : {skipped_count}. Erreurs : {failed_count}."
+    )
     return 1 if failed_count else 0
 
 
@@ -329,18 +503,36 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--execute", action="store_true", help="Cree vraiment les produits.")
     parser.add_argument("--dry-run", action="store_true", help="Teste sans creer de produit.")
     parser.add_argument("--skip-images", action="store_true", help="Cree les produits sans envoyer les images.")
+    parser.add_argument("--skip-videos", action="store_true", help="Ignore les videos presentes dans les dossiers produits.")
     parser.add_argument("--publish", action="store_true", help="Publie directement les produits. Par defaut: draft.")
     parser.add_argument(
         "--update-existing",
         action="store_true",
-        help="Reserve pour une prochaine etape. Actuellement, les produits existants sont ignores.",
+        help="Met a jour les produits existants trouves par reference/SKU.",
+    )
+    parser.add_argument(
+        "--keep-existing-images",
+        action="store_true",
+        help="Avec --update-existing, conserve les images deja presentes dans WooCommerce.",
+    )
+    parser.add_argument(
+        "--upload-retries",
+        type=int,
+        default=5,
+        help="Nombre de nouveaux essais pour les uploads images en erreur temporaire.",
+    )
+    parser.add_argument(
+        "--retry-delay",
+        type=float,
+        default=5,
+        help="Delai de base en secondes entre deux essais. Le delai augmente a chaque essai.",
     )
     args = parser.parse_args()
 
     if args.execute and args.dry_run:
         raise SystemExit("Choisis soit --execute, soit --dry-run, pas les deux.")
-    if args.update_existing:
-        raise SystemExit("--update-existing n'est pas encore implemente. Supprime cette option.")
+    if args.keep_existing_images and not args.update_existing:
+        raise SystemExit("--keep-existing-images necessite --update-existing.")
 
     return args
 

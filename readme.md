@@ -95,6 +95,12 @@ Créer les produits en brouillon avec images :
 python scripts/importer_woocommerce.py --execute
 ```
 
+Mettre à jour les produits existants :
+
+```bash
+python scripts/importer_woocommerce.py --execute --update-existing
+```
+
 Préparer les images avant import :
 
 ```bash
@@ -105,6 +111,18 @@ Importer le catalogue préparé :
 
 ```bash
 python scripts/importer_woocommerce.py --csv data/produits_prepares.csv --images-root produits/images_optimisees --execute
+```
+
+Mettre à jour les produits existants avec le catalogue préparé :
+
+```bash
+python scripts/importer_woocommerce.py --csv data/produits_prepares.csv --images-root produits/images_optimisees --execute --update-existing
+```
+
+Relancer automatiquement les uploads en cas d'erreur serveur temporaire :
+
+```bash
+python scripts/importer_woocommerce.py --csv data/produits_prepares.csv --images-root produits/images_optimisees --execute --update-existing --upload-retries 8 --retry-delay 10
 ```
 
 Générer les descriptions avec l'IA :

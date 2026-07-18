@@ -30,6 +30,39 @@ from typing import Any
 
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+MOJIBAKE_MARKERS = ("Ã", "Â", "â€", "â€™", "â€œ", "â€�", "â€“", "â€”")
+MOJIBAKE_REPLACEMENTS = {
+    "â€™": "'",
+    "â€˜": "'",
+    "â€œ": '"',
+    "â€�": '"',
+    "â€“": "-",
+    "â€”": "-",
+    "â€¦": "...",
+    "Â ": " ",
+    "Â": "",
+}
+
+
+def fix_text_encoding(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+
+    text = value
+    if any(marker in text for marker in MOJIBAKE_MARKERS):
+        try:
+            text = text.encode("cp1252").decode("utf-8")
+        except UnicodeError:
+            pass
+
+    for bad, good in MOJIBAKE_REPLACEMENTS.items():
+        text = text.replace(bad, good)
+
+    return text
+
+
+def clean_row_text(row: dict[str, str]) -> dict[str, str]:
+    return {fix_text_encoding(key): fix_text_encoding(value).strip() for key, value in row.items()}
 
 
 def load_dotenv(path: Path) -> None:
@@ -50,8 +83,8 @@ def read_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
 
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
-        rows = [{key: (value or "").strip() for key, value in row.items()} for row in reader]
-        fieldnames = list(reader.fieldnames or [])
+        rows = [clean_row_text({key: value or "" for key, value in row.items()}) for row in reader]
+        fieldnames = [fix_text_encoding(name) for name in list(reader.fieldnames or [])]
 
     if not rows:
         raise SystemExit(f"Le CSV est vide : {path}")
@@ -59,11 +92,18 @@ def read_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
 
 
 def write_csv(path: Path, fieldnames: list[str], rows: list[dict[str, str]]) -> None:
+    known_fields = list(fieldnames)
+    for row in rows:
+        for key in row:
+            if key not in known_fields:
+                known_fields.append(key)
+    cleaned_rows = [clean_row_text(row) for row in rows]
+
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer = csv.DictWriter(handle, fieldnames=known_fields, extrasaction="ignore")
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(cleaned_rows)
 
 
 def read_raw_descriptions(path: Path) -> dict[str, str]:
@@ -76,7 +116,7 @@ def read_raw_descriptions(path: Path) -> dict[str, str]:
         if not line or " - " not in line:
             continue
         reference, description = line.split(" - ", 1)
-        descriptions[reference.strip()] = description.strip()
+        descriptions[fix_text_encoding(reference).strip()] = fix_text_encoding(description).strip()
     return descriptions
 
 
@@ -230,14 +270,23 @@ Schema attendu:
         web_tool_type = os.getenv("OPENAI_WEB_TOOL_TYPE", "web_search_preview")
         request["tools"] = [{"type": web_tool_type, "search_context_size": "low"}]
 
-    response = client.responses.create(**request)
+    try:
+        response = client.responses.create(**request)
+    except Exception as exc:
+        if use_web_search:
+            raise RuntimeError(
+                "La generation IA avec recherche web a echoue. "
+                "Essaie d'abord sans --web-search. Si le probleme continue, "
+                "verifie OPENAI_WEB_TOOL_TYPE dans .env."
+            ) from exc
+        raise
     result = parse_json_object(response.output_text)
 
     return {
-        "nom": str(result.get("nom", row.get("nom", ""))).strip(),
-        "description_courte": str(result.get("description_courte", "")).strip(),
-        "description": str(result.get("description", "")).strip(),
-        "mots_cles": str(result.get("mots_cles", "")).strip(),
+        "nom": fix_text_encoding(str(result.get("nom", row.get("nom", "")))).strip(),
+        "description_courte": fix_text_encoding(str(result.get("description_courte", ""))).strip(),
+        "description": fix_text_encoding(str(result.get("description", ""))).strip(),
+        "mots_cles": fix_text_encoding(str(result.get("mots_cles", ""))).strip(),
     }
 
 
@@ -246,7 +295,7 @@ def prepare_catalog(args: argparse.Namespace) -> int:
     fieldnames, rows = read_csv(args.csv)
     raw_descriptions = read_raw_descriptions(args.descriptions)
 
-    for extra_field in ["mots_cles"]:
+    for extra_field in ["description_courte", "mots_cles"]:
         if extra_field not in fieldnames:
             fieldnames.append(extra_field)
 
@@ -286,6 +335,7 @@ def prepare_catalog(args: argparse.Namespace) -> int:
             row["description"] = raw_notes
 
         output_rows.append(row)
+        write_csv(args.output, fieldnames, output_rows)
 
     write_csv(args.output, fieldnames, output_rows)
     print("")

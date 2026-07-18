@@ -1,0 +1,3 @@
+Catalogue généré automatiquement à partir du stock photographique.
+Les champs prix, stock, état, taille, pointure, marque et matière sont laissés vides car ils ne peuvent pas être déduits de manière fiable des photographies seules.
+Toutes les références sont en statut draft pour validation avant publication.

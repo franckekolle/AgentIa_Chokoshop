@@ -1,6 +1,0 @@
-reference,nom,categorie,sous_categorie,prix,stock,etat,couleur,taille,pointure,marque,matiere,genre,description_courte,description,dossier_images,statut
-CH001,Baskets Running Air Max,Chaussures,Baskets,89.90,1,Tres bon etat,Noir,,42,Nike,Tissu et caoutchouc,Homme,Baskets confortables pour usage quotidien.,Baskets running noires en tres bon etat. Modele confortable adapte a un usage quotidien.,CH001,draft
-VE001,Veste jean femme,Vetements,Veste,34.90,1,Bon etat,Bleu,M,,Zara,Jean,Femme,Veste jean bleue coupe classique.,Veste en jean femme taille M en bon etat. Couleur bleue, coupe classique, facile a porter.,VE001,draft
-PA001,Pantalon chino homme,Pantalons,Chino,29.90,1,Tres bon etat,Beige,42,,Generic,Coton,Homme,Pantalon chino beige en tres bon etat.,Pantalon chino homme couleur beige, taille 42, en tres bon etat. Style simple pour tenue casual ou habillee.,PA001,draft
-SA001,Sac a main noir,Sacs,Sac a main,44.90,1,Tres bon etat,Noir,,,Generic,Similicuir,Femme,Sac a main noir elegant.,Sac a main noir en tres bon etat avec rangement interieur. Modele pratique pour sorties et usage quotidien.,SA001,draft
-AC001,Ceinture cuir marron,Accessoires,Ceinture,14.90,1,Bon etat,Marron,,,Generic,Cuir,Homme,Ceinture marron classique.,Ceinture marron en bon etat. Accessoire simple et pratique pour tenue quotidienne.,AC001,draft

@@ -298,6 +298,18 @@ Creer les produits en brouillon avec images :
 python scripts/importer_woocommerce.py --execute
 ```
 
+Mettre a jour les produits deja existants :
+
+```bash
+python scripts/importer_woocommerce.py --execute --update-existing
+```
+
+Mettre a jour les produits deja existants en conservant leurs images actuelles :
+
+```bash
+python scripts/importer_woocommerce.py --execute --update-existing --keep-existing-images
+```
+
 Publier directement les produits :
 
 ```bash
@@ -328,6 +340,12 @@ Importer ensuite les produits avec les images optimisees :
 
 ```bash
 python scripts/importer_woocommerce.py --csv data/produits_prepares.csv --images-root produits/images_optimisees --execute
+```
+
+Mettre a jour les produits existants avec le catalogue prepare :
+
+```bash
+python scripts/importer_woocommerce.py --csv data/produits_prepares.csv --images-root produits/images_optimisees --execute --update-existing
 ```
 
 Ne pas reformater les images :
@@ -475,6 +493,18 @@ Import du catalogue prepare :
 python scripts/importer_woocommerce.py --csv data/produits_prepares.csv --images-root produits/images_optimisees --execute
 ```
 
+Mise a jour des produits existants :
+
+```bash
+python scripts/importer_woocommerce.py --csv data/produits_prepares.csv --images-root produits/images_optimisees --execute --update-existing
+```
+
+Mise a jour sans remplacer les images :
+
+```bash
+python scripts/importer_woocommerce.py --csv data/produits_prepares.csv --execute --update-existing --keep-existing-images
+```
+
 Publication directe :
 
 ```bash
@@ -505,7 +535,25 @@ Solution : renseigner `WORDPRESS_USER` et `WORDPRESS_APP_PASSWORD` dans `.env`.
 
 Cause : un produit avec la meme reference existe deja dans WooCommerce.
 
-Solution : verifier le produit existant dans WordPress. Le script evite les doublons.
+Solution : verifier le produit existant dans WordPress ou utiliser `--update-existing` pour le mettre a jour.
+
+`503 Service Unavailable`
+
+Cause : le serveur WordPress refuse temporairement l'envoi des images, souvent a cause d'une surcharge, d'une maintenance ou d'une limite d'hebergement.
+
+Solution automatique : le script relance maintenant les uploads images plusieurs fois avant d'abandonner.
+
+Commande avec attente plus longue :
+
+```bash
+python scripts/importer_woocommerce.py --csv data/produits_prepares.csv --images-root produits/images_optimisees --execute --update-existing --upload-retries 8 --retry-delay 10
+```
+
+`prix vide`
+
+Cause : la colonne `prix` est vide pour ce produit.
+
+Solution : remplir le prix dans le CSV avant import. Le script verifie maintenant le prix avant d'envoyer les images, pour eviter d'envoyer des images si le produit ne peut pas etre cree.
 
 ## 15. Workflow recommande
 
@@ -537,6 +585,21 @@ python scripts/preparer_catalogue_ai.py --use-ai-descriptions
 python scripts/importer_woocommerce.py --csv data/produits_prepares.csv --images-root produits/images_optimisees --execute
 ```
 
-7. Verifier dans WordPress.
-8. Publier les produits valides.
+7. Si les produits existent deja, mettre a jour :
 
+```bash
+python scripts/importer_woocommerce.py --csv data/produits_prepares.csv --images-root produits/images_optimisees --execute --update-existing
+```
+
+8. Verifier dans WordPress.
+9. Publier les produits valides.
+
+
+python scripts/importer_woocommerce.py --csv data/produits_prepares.csv --images-root produits/images_optimisees --execute --update-existing --upload-retries 8 --retry-delay 10
+
+Si tu veux mettre à jour les textes/prix/stocks mais garder les images déjà présentes dans WooCommerce, utilise :
+python scripts/importer_woocommerce.py --csv data/produits_prepares.csv --execute --update-existing --keep-existing-images
+
+ou 
+python scripts/importer_woocommerce.py --csv data/produits_prepares.csv --images-root produits/images_optimisees --execute --update-existing 
+Si tu veux mettre à jour si le produit existe déjà, le créer s'il n'existe pas encore, 
