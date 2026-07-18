@@ -136,6 +136,31 @@ Formats images acceptes :
 .webp
 ```
 
+Formats videos acceptes :
+
+```text
+.mp4
+.mov
+.webm
+.m4v
+```
+
+Les videos doivent etre placees dans le meme dossier que les images du produit.
+
+Exemple :
+
+```text
+produits/images/CH001/01.jpg
+produits/images/CH001/02.jpg
+produits/images/CH001/video_01.mp4
+```
+
+Lors de l'import :
+
+- les images sont ajoutees a la galerie WooCommerce ;
+- les videos sont envoyees dans la mediatheque WordPress ;
+- les videos sont ajoutees automatiquement dans la description du produit sous forme de lecteur video.
+
 ## 5. Fichier CSV des produits
 
 Le fichier CSV principal se place dans :
@@ -298,6 +323,18 @@ Creer les produits en brouillon avec images :
 python scripts/importer_woocommerce.py --execute
 ```
 
+Creer ou mettre a jour les produits avec images et videos :
+
+```bash
+python scripts/importer_woocommerce.py --csv data/produits_prepares.csv --images-root produits/images --execute --update-existing
+```
+
+Creer ou mettre a jour les produits en ignorant les videos :
+
+```bash
+python scripts/importer_woocommerce.py --csv data/produits_prepares.csv --images-root produits/images --execute --update-existing --skip-videos
+```
+
 Mettre a jour les produits deja existants :
 
 ```bash
@@ -333,6 +370,7 @@ Cette commande :
 - lit le CSV dans `data/exemple_produits_chaussures.csv` ;
 - lit les images dans `produits/images/` ;
 - cree des images carrees en `1200 x 1200` ;
+- copie les videos dans le dossier optimise si elles existent ;
 - place les images optimisees dans `produits/images_optimisees/` ;
 - cree le CSV prepare `data/produits_prepares.csv`.
 
@@ -469,6 +507,18 @@ Creation en brouillon avec images :
 python scripts/importer_woocommerce.py --execute
 ```
 
+Creation ou mise a jour avec images et videos :
+
+```bash
+python scripts/importer_woocommerce.py --csv data/produits_prepares.csv --images-root produits/images --execute --update-existing
+```
+
+Creation ou mise a jour en ignorant les videos :
+
+```bash
+python scripts/importer_woocommerce.py --csv data/produits_prepares.csv --images-root produits/images --execute --update-existing --skip-videos
+```
+
 Preparation des images :
 
 ```bash
@@ -593,13 +643,3 @@ python scripts/importer_woocommerce.py --csv data/produits_prepares.csv --images
 
 8. Verifier dans WordPress.
 9. Publier les produits valides.
-
-
-python scripts/importer_woocommerce.py --csv data/produits_prepares.csv --images-root produits/images_optimisees --execute --update-existing --upload-retries 8 --retry-delay 10
-
-Si tu veux mettre à jour les textes/prix/stocks mais garder les images déjà présentes dans WooCommerce, utilise :
-python scripts/importer_woocommerce.py --csv data/produits_prepares.csv --execute --update-existing --keep-existing-images
-
-ou 
-python scripts/importer_woocommerce.py --csv data/produits_prepares.csv --images-root produits/images_optimisees --execute --update-existing 
-Si tu veux mettre à jour si le produit existe déjà, le créer s'il n'existe pas encore, 

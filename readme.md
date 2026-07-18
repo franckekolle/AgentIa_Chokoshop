@@ -95,6 +95,12 @@ Créer les produits en brouillon avec images :
 python scripts/importer_woocommerce.py --execute
 ```
 
+Créer ou mettre à jour avec images et vidéos dans la description :
+
+```bash
+python scripts/importer_woocommerce.py --csv data/produits_prepares.csv --images-root produits/images --execute --update-existing
+```
+
 Mettre à jour les produits existants :
 
 ```bash

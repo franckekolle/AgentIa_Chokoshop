@@ -25,11 +25,13 @@ import csv
 import json
 import mimetypes
 import os
+import shutil
 from pathlib import Path
 from typing import Any
 
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm", ".m4v"}
 MOJIBAKE_MARKERS = ("Ã", "Â", "â€", "â€™", "â€œ", "â€�", "â€“", "â€”")
 MOJIBAKE_REPLACEMENTS = {
     "â€™": "'",
@@ -133,6 +135,31 @@ def find_images(images_root: Path, folder_name: str) -> list[Path]:
         ],
         key=lambda path: path.name.lower(),
     )
+
+
+def find_videos(images_root: Path, folder_name: str) -> list[Path]:
+    folder = images_root / folder_name
+    if not folder.exists():
+        return []
+
+    return sorted(
+        [
+            path
+            for path in folder.iterdir()
+            if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS
+        ],
+        key=lambda path: path.name.lower(),
+    )
+
+
+def copy_videos(video_paths: list[Path], output_folder: Path) -> list[Path]:
+    output_folder.mkdir(parents=True, exist_ok=True)
+    copied_paths: list[Path] = []
+    for index, video_path in enumerate(video_paths, start=1):
+        output_path = output_folder / f"video_{index:02d}{video_path.suffix.lower()}"
+        shutil.copy2(video_path, output_path)
+        copied_paths.append(output_path)
+    return copied_paths
 
 
 def optimize_images(
@@ -305,6 +332,7 @@ def prepare_catalog(args: argparse.Namespace) -> int:
         reference = row.get("reference", f"ligne-{index}")
         source_folder = row.get("dossier_images", reference) or reference
         source_images = find_images(args.images_root, source_folder)
+        source_videos = find_videos(args.images_root, source_folder)
         optimized_folder = args.optimized_root / reference
 
         print(f"[{index}/{len(rows)}] {reference} - {row.get('nom', '')}")
@@ -313,7 +341,9 @@ def prepare_catalog(args: argparse.Namespace) -> int:
             print("  reformattage images : ignore")
         else:
             optimized_images = optimize_images(source_images, optimized_folder, args.image_size, args.quality)
+            copied_videos = copy_videos(source_videos, optimized_folder)
             print(f"  images optimisees : {len(optimized_images)}")
+            print(f"  videos copiees : {len(copied_videos)}")
 
         if not args.skip_image_formatting:
             row["dossier_images"] = reference
