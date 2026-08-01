@@ -241,6 +241,20 @@ python scripts/importer_woocommerce.py --execute
 
 Par securite, le script force le statut `draft`.
 
+### 8.4.1 Publier directement sur le site
+
+Quand les fiches sont pretes, ajoute `--publish` a la commande d'import :
+
+```bash
+python scripts/importer_woocommerce.py --csv data/produits_avec_descriptions.csv --images-root produits/images --execute --publish
+```
+
+Pour mettre a jour des produits deja importes et les publier directement :
+
+```bash
+python scripts/importer_woocommerce.py --csv data/produits_avec_descriptions.csv --images-root produits/images --execute --update-existing --publish
+```
+
 ### 8.5 Creer les produits sans images
 
 Si tu veux tester la creation des fiches sans envoyer les photos :

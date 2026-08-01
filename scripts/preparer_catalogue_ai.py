@@ -15,6 +15,9 @@ With AI descriptions:
 
 With AI + web search:
     python scripts/preparer_catalogue_ai.py --use-ai-descriptions --web-search
+
+With AI descriptions + pricing:
+    python scripts/preparer_catalogue_ai.py --use-ai-descriptions --use-ai-pricing --web-search
 """
 
 from __future__ import annotations
@@ -25,6 +28,7 @@ import csv
 import json
 import mimetypes
 import os
+import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -44,6 +48,19 @@ MOJIBAKE_REPLACEMENTS = {
     "Â ": " ",
     "Â": "",
 }
+
+DESCRIPTION_BLOCKS_TO_REMOVE = (
+    """DÉTAILS VISIBLES
+• Type : sac à main femme
+• Présentation : anses et corps du sac visibles sur le média associé
+• Usage : quotidien, ville ou occasion
+• Style : élégant et polyvalent
+
+La marque, le modèle commercial exact, la matière, les dimensions et les accessoires inclus ne sont pas indiqués dans cette fiche tant qu’ils n’ont pas été confirmés avec certitude sur le média original.""",
+    "La matière, la taille, le type de pierre ou de finition et la marque ne sont pas affirmés sans vérification certaine.",
+    "La marque, la fragrance, la contenance, la texture et les conseils d’application exacts doivent être confirmés sur l’étiquette avant publication.",
+    "La marque, la fragrance, la contenance et les conseils d’utilisation exacts doivent être confirmés directement sur l’étiquette avant publication.",
+)
 
 
 def fix_text_encoding(value: Any) -> Any:
@@ -65,6 +82,24 @@ def fix_text_encoding(value: Any) -> Any:
 
 def clean_row_text(row: dict[str, str]) -> dict[str, str]:
     return {fix_text_encoding(key): fix_text_encoding(value).strip() for key, value in row.items()}
+
+
+def clean_product_description(value: str) -> str:
+    text = fix_text_encoding(value)
+    for block in DESCRIPTION_BLOCKS_TO_REMOVE:
+        text = text.replace(block, "")
+
+    lines = [line.rstrip() for line in text.splitlines()]
+    cleaned_lines: list[str] = []
+    previous_blank = False
+    for line in lines:
+        is_blank = not line.strip()
+        if is_blank and previous_blank:
+            continue
+        cleaned_lines.append(line)
+        previous_blank = is_blank
+
+    return "\n".join(cleaned_lines).strip()
 
 
 def load_dotenv(path: Path) -> None:
@@ -317,12 +352,115 @@ Schema attendu:
     }
 
 
+def normalize_price(value: str) -> str:
+    text = fix_text_encoding(value).strip().replace(",", ".")
+    match = re.search(r"\d+(?:\.\d+)?", text)
+    if not match:
+        return ""
+    amount = float(match.group(0))
+    return f"{amount:.2f}"
+
+
+def generate_price_with_ai(
+    row: dict[str, str],
+    raw_notes: str,
+    main_image: Path | None,
+    use_web_search: bool,
+) -> dict[str, str]:
+    try:
+        from openai import OpenAI
+    except ImportError as exc:
+        raise SystemExit(
+            "La librairie openai est necessaire pour utiliser l'IA. "
+            "Installe-la avec : python -m pip install -r requirements-ai.txt"
+        ) from exc
+
+    if not os.getenv("OPENAI_API_KEY"):
+        raise SystemExit("OPENAI_API_KEY est manquant dans .env")
+    if not use_web_search:
+        raise SystemExit("--use-ai-pricing necessite --web-search pour estimer un prix de marche.")
+
+    client = OpenAI()
+    model = os.getenv("OPENAI_MODEL", "gpt-5")
+    known_data = {
+        "reference": row.get("reference", ""),
+        "nom": row.get("nom", ""),
+        "categorie": row.get("categorie", ""),
+        "sous_categorie": row.get("sous_categorie", ""),
+        "etat": row.get("etat", ""),
+        "couleur": row.get("couleur", ""),
+        "taille": row.get("taille", ""),
+        "pointure": row.get("pointure", ""),
+        "marque": row.get("marque", ""),
+        "matiere": row.get("matiere", ""),
+        "genre": row.get("genre", ""),
+        "description": row.get("description", ""),
+        "notes_brutes": raw_notes,
+    }
+
+    prompt = f"""
+Tu aides a proposer un prix de vente prudent pour une boutique WooCommerce de chaussures, vetements, sacs et accessoires.
+
+Donnees du produit:
+{json.dumps(known_data, ensure_ascii=False, indent=2)}
+
+Consignes strictes:
+- Reponds uniquement en JSON valide.
+- Utilise la recherche web pour estimer une fourchette de marche comparable.
+- Ne mens pas sur la marque, le modele, la matiere, l'etat, la taille ou la pointure.
+- Si les informations sont insuffisantes, reste prudent et mets "prix_a_verifier": "oui".
+- Le prix doit etre un prix de vente conseille pour ce produit d'occasion ou a verifier, en euros.
+- Ne propose pas un prix neuf si le produit semble d'occasion ou si l'etat n'est pas confirme.
+- Si la photo ou le texte ne permettent pas une estimation fiable, donne une fourchette large.
+
+Schema attendu:
+{{
+  "prix": "prix conseille avec point decimal, exemple 24.90",
+  "prix_min_marche": "prix minimum constate/estime",
+  "prix_max_marche": "prix maximum constate/estime",
+  "prix_a_verifier": "oui|non",
+  "prix_source_logique": "explication courte, sans URL obligatoire"
+}}
+""".strip()
+
+    content: list[dict[str, str]] = [{"type": "input_text", "text": prompt}]
+    if main_image is not None:
+        content.append(
+            {
+                "type": "input_image",
+                "image_url": image_to_data_url(main_image),
+                "detail": "low",
+            }
+        )
+
+    response = client.responses.create(
+        model=model,
+        input=[{"role": "user", "content": content}],
+        tools=[
+            {
+                "type": os.getenv("OPENAI_WEB_TOOL_TYPE", "web_search_preview"),
+                "search_context_size": "low",
+            }
+        ],
+        store=False,
+    )
+    result = parse_json_object(response.output_text)
+
+    return {
+        "prix": normalize_price(str(result.get("prix", row.get("prix", "")))),
+        "prix_min_marche": normalize_price(str(result.get("prix_min_marche", ""))),
+        "prix_max_marche": normalize_price(str(result.get("prix_max_marche", ""))),
+        "prix_a_verifier": fix_text_encoding(str(result.get("prix_a_verifier", "oui"))).strip() or "oui",
+        "prix_source_logique": fix_text_encoding(str(result.get("prix_source_logique", ""))).strip(),
+    }
+
+
 def prepare_catalog(args: argparse.Namespace) -> int:
     load_dotenv(args.env)
     fieldnames, rows = read_csv(args.csv)
     raw_descriptions = read_raw_descriptions(args.descriptions)
 
-    for extra_field in ["description_courte", "mots_cles"]:
+    for extra_field in ["description_courte", "mots_cles", "prix_min_marche", "prix_max_marche", "prix_a_verifier", "prix_source_logique"]:
         if extra_field not in fieldnames:
             fieldnames.append(extra_field)
 
@@ -364,6 +502,24 @@ def prepare_catalog(args: argparse.Namespace) -> int:
         elif raw_notes and not row.get("description"):
             row["description"] = raw_notes
 
+        row["description"] = clean_product_description(row.get("description", ""))
+
+        if args.use_ai_pricing and not row.get("prix", "").strip():
+            price_data = generate_price_with_ai(
+                row=row,
+                raw_notes=raw_notes,
+                main_image=optimized_images[0] if optimized_images else None,
+                use_web_search=args.web_search,
+            )
+            row["prix"] = price_data["prix"] or row.get("prix", "")
+            row["prix_min_marche"] = price_data["prix_min_marche"]
+            row["prix_max_marche"] = price_data["prix_max_marche"]
+            row["prix_a_verifier"] = price_data["prix_a_verifier"]
+            row["prix_source_logique"] = price_data["prix_source_logique"]
+            print("  prix IA propose")
+        elif args.use_ai_pricing:
+            row.setdefault("prix_a_verifier", "non")
+
         output_rows.append(row)
         write_csv(args.output, fieldnames, output_rows)
 
@@ -402,6 +558,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--web-search", action="store_true")
     parser.add_argument(
+        "--use-ai-pricing",
+        action="store_true",
+        help="Propose un prix de marche avec l'IA. Necessite --web-search. Ne remplace pas les prix deja renseignes.",
+    )
+    parser.add_argument(
         "--skip-image-formatting",
         action="store_true",
         help="Ne reformate pas les images. Le CSV de sortie garde les dossiers images originaux.",
@@ -413,10 +574,13 @@ def parse_args() -> argparse.Namespace:
 
     if args.use_ai_descriptions and args.no_ai:
         raise SystemExit("Choisis soit --use-ai, soit --no-ai.")
-    if args.web_search and not args.use_ai_descriptions:
-        raise SystemExit("--web-search necessite --use-ai-descriptions.")
+    if args.web_search and not (args.use_ai_descriptions or args.use_ai_pricing):
+        raise SystemExit("--web-search necessite --use-ai-descriptions ou --use-ai-pricing.")
+    if args.use_ai_pricing and not args.web_search:
+        raise SystemExit("--use-ai-pricing necessite --web-search.")
     return args
 
 
 if __name__ == "__main__":
     raise SystemExit(prepare_catalog(parse_args()))
+

@@ -47,6 +47,19 @@ MOJIBAKE_REPLACEMENTS = {
     "Â": "",
 }
 
+DESCRIPTION_BLOCKS_TO_REMOVE = (
+    """DÉTAILS VISIBLES
+• Type : sac à main femme
+• Présentation : anses et corps du sac visibles sur le média associé
+• Usage : quotidien, ville ou occasion
+• Style : élégant et polyvalent
+
+La marque, le modèle commercial exact, la matière, les dimensions et les accessoires inclus ne sont pas indiqués dans cette fiche tant qu’ils n’ont pas été confirmés avec certitude sur le média original.""",
+    "La matière, la taille, le type de pierre ou de finition et la marque ne sont pas affirmés sans vérification certaine.",
+    "La marque, la fragrance, la contenance, la texture et les conseils d’application exacts doivent être confirmés sur l’étiquette avant publication.",
+    "La marque, la fragrance, la contenance et les conseils d’utilisation exacts doivent être confirmés directement sur l’étiquette avant publication.",
+)
+
 
 def fix_text_encoding(value: Any) -> Any:
     if not isinstance(value, str):
@@ -67,6 +80,24 @@ def fix_text_encoding(value: Any) -> Any:
 
 def clean_row_text(row: dict[str, str]) -> dict[str, str]:
     return {fix_text_encoding(key): fix_text_encoding(value).strip() for key, value in row.items()}
+
+
+def clean_product_description(value: str) -> str:
+    text = fix_text_encoding(value)
+    for block in DESCRIPTION_BLOCKS_TO_REMOVE:
+        text = text.replace(block, "")
+
+    lines = [line.rstrip() for line in text.splitlines()]
+    cleaned_lines: list[str] = []
+    previous_blank = False
+    for line in lines:
+        is_blank = not line.strip()
+        if is_blank and previous_blank:
+            continue
+        cleaned_lines.append(line)
+        previous_blank = is_blank
+
+    return "\n".join(cleaned_lines).strip()
 
 
 @dataclass
@@ -342,7 +373,7 @@ def build_product_payload(
     else:
         status = "draft"
 
-    description = fix_text_encoding(row.get("description", ""))
+    description = clean_product_description(row.get("description", ""))
     if video_urls:
         video_html = build_video_description_html(video_urls)
         description = f"{description}\n\n{video_html}" if description else video_html
@@ -463,7 +494,7 @@ def import_products(args: argparse.Namespace) -> int:
 
                 payload["images"] = [{"id": image_id} for image_id in media_ids]
                 if video_urls:
-                    description = fix_text_encoding(row.get("description", ""))
+                    description = clean_product_description(row.get("description", ""))
                     video_html = build_video_description_html(video_urls)
                     payload["description"] = f"{description}\n\n{video_html}" if description else video_html
 

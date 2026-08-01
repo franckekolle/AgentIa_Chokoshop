@@ -35,6 +35,7 @@ Multi_Cluster_gst/
   scripts/
     importer_woocommerce.py     # Import des produits dans WooCommerce
     preparer_catalogue_ai.py    # Préparation images et descriptions IA
+    classer_medias_ai.py        # Classement d'un dossier média mélangé
 
   manuel_utilisation_chokoshop.md
   woocommerce_automation_guide.md
@@ -95,6 +96,46 @@ Créer les produits en brouillon avec images :
 python scripts/importer_woocommerce.py --execute
 ```
 
+Publier directement les produits sur le site avec images :
+
+```bash
+python scripts/importer_woocommerce.py --csv data/produits_avec_descriptions.csv --images-root produits/images --execute --publish
+```
+
+Publier directement en mettant a jour les produits existants :
+
+```bash
+python scripts/importer_woocommerce.py --csv data/produits_avec_descriptions.csv --images-root produits/images --execute --update-existing --keep-existing-images --publish
+```
+
+## CI/CD GitHub
+
+Le workflow GitHub Actions est dans `.github/workflows/ci-cd.yml`.
+
+Il lance automatiquement les controles sur `push` et `pull_request` :
+
+```bash
+python -m compileall scripts
+python scripts/validate_catalogue.py --csv data/produits_avec_descriptions.csv --images-root produits/images
+python scripts/importer_woocommerce.py --csv data/produits_avec_descriptions.csv --images-root produits/images --dry-run --skip-images --skip-videos
+```
+
+Pour publier depuis GitHub, va dans `Actions > WooCommerce CI/CD > Run workflow`, puis choisis :
+
+- `validate-only` : controle uniquement.
+- `publish-new` : cree et publie les nouveaux produits.
+- `publish-update` : met a jour et publie les produits existants.
+
+Ajoute ces secrets dans `Settings > Secrets and variables > Actions` :
+
+```text
+WORDPRESS_URL
+WOOCOMMERCE_CONSUMER_KEY
+WOOCOMMERCE_CONSUMER_SECRET
+WORDPRESS_USER
+WORDPRESS_APP_PASSWORD
+```
+
 Créer ou mettre à jour avec images et vidéos dans la description :
 
 ```bash
@@ -143,6 +184,18 @@ Générer les descriptions avec IA et recherche web :
 python scripts/preparer_catalogue_ai.py --use-ai-descriptions --web-search
 ```
 
+Générer les descriptions et proposer les prix avec IA + recherche web, dans un fichier séparé :
+
+```bash
+python scripts/preparer_catalogue_ai.py --use-ai-descriptions --use-ai-pricing --web-search --output data/produits_avec_prix_ia.csv
+```
+
+Classer un dossier mélangé de photos/vidéos avant import :
+
+```bash
+python scripts/classer_medias_ai.py --source chemin/vers/dossier_depart
+```
+
 ## Documentation
 
 Le manuel complet d'utilisation se trouve ici :
@@ -152,3 +205,4 @@ manuel_utilisation_chokoshop.md
 ```
 
 Il décrit la préparation des dossiers, le remplissage du CSV, les options d'images, les options IA et la procédure de vérification dans WordPress.
+

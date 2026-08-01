@@ -49,6 +49,7 @@ Multi_Cluster_gst/
   scripts/
     importer_woocommerce.py
     preparer_catalogue_ai.py
+    classer_medias_ai.py
 ```
 
 ## 2. Fichier `.env`
@@ -417,7 +418,15 @@ Generer les descriptions avec IA et recherche web :
 python scripts/preparer_catalogue_ai.py --use-ai-descriptions --web-search
 ```
 
-La recherche web sert seulement a enrichir le contexte general du produit.
+Generer les descriptions et proposer les prix avec IA + recherche web, dans un fichier separe :
+
+```bash
+python scripts/preparer_catalogue_ai.py --use-ai-descriptions --use-ai-pricing --web-search --output data/produits_avec_prix_ia.csv
+```
+
+L'option `--use-ai-pricing` propose un prix seulement si la colonne `prix` est vide. Elle ne remplace pas les prix deja renseignes.
+
+La recherche web sert a enrichir le contexte general du produit et a estimer une fourchette de prix prudente.
 
 L'IA utilise :
 
@@ -468,6 +477,15 @@ python scripts/importer_woocommerce.py --csv data/produits_prepares.csv --images
 python scripts/preparer_catalogue_ai.py --use-ai-descriptions --web-search
 python scripts/importer_woocommerce.py --csv data/produits_prepares.csv --images-root produits/images_optimisees --execute
 ```
+
+### Mode IA descriptions + prix
+
+```bash
+python scripts/preparer_catalogue_ai.py --use-ai-descriptions --use-ai-pricing --web-search --output data/produits_avec_prix_ia.csv
+python scripts/importer_woocommerce.py --csv data/produits_avec_prix_ia.csv --images-root produits/images_optimisees --execute --update-existing
+```
+
+Verifier les colonnes `prix`, `prix_min_marche`, `prix_max_marche`, `prix_a_verifier` et `prix_source_logique` avant publication.
 
 ## 12. Verification dans WordPress
 
@@ -643,3 +661,112 @@ python scripts/importer_woocommerce.py --csv data/produits_prepares.csv --images
 
 8. Verifier dans WordPress.
 9. Publier les produits valides.
+
+## 16. Classement automatique d'un dossier melange
+
+Cette etape sert quand les photos et videos ne sont pas encore rangees par produit.
+
+Le dossier source peut contenir des fichiers melanges :
+
+```text
+produits/a_classer/
+  IMG_001.jpg
+  IMG_002.png
+  IMG_003.jpg
+  video_001.mp4
+  IMG_004.jpg
+  video_002.mov
+```
+
+Le script ne modifie jamais ce dossier source.
+
+Important : ne jamais utiliser la racine du projet comme dossier source.
+
+Commande incorrecte :
+
+```bash
+python scripts/classer_medias_ai.py --source C:\Users\ekolleessoh\Multi_Cluster_gst
+```
+
+Commande correcte :
+
+```bash
+python scripts/classer_medias_ai.py --source produits/a_classer
+```
+
+### 16.1 Tester le classement sans copier
+
+```bash
+python scripts/classer_medias_ai.py --source produits/a_classer
+```
+
+Cette commande cree :
+
+```text
+data/classement_medias_ai.csv
+data/produits_classes_ai.csv
+data/classement_ai_work/
+```
+
+Le fichier `data/classement_medias_ai.csv` sert a verifier quel fichier source sera copie dans quel dossier produit.
+
+Le fichier `data/produits_classes_ai.csv` sert ensuite a importer les produits dans WooCommerce.
+
+### 16.2 Copier les medias apres verification
+
+```bash
+python scripts/classer_medias_ai.py --source produits/a_classer --execute
+```
+
+Cette commande copie les medias dans :
+
+```text
+produits/images/CHxxx/
+```
+
+Exemple de resultat :
+
+```text
+produits/images/CH122/01.jpg
+produits/images/CH122/02.jpg
+produits/images/CH122/video_01.mp4
+```
+
+### 16.3 Importer les produits classes
+
+```bash
+python scripts/importer_woocommerce.py --csv data/produits_classes_ai.csv --images-root produits/images --execute
+```
+
+Pour mettre a jour si le produit existe deja :
+
+```bash
+python scripts/importer_woocommerce.py --csv data/produits_classes_ai.csv --images-root produits/images --execute --update-existing
+```
+
+### 16.4 Options utiles
+
+Choisir la premiere reference :
+
+```bash
+python scripts/classer_medias_ai.py --source produits/a_classer --start-number 122
+```
+
+Utiliser un autre prefixe :
+
+```bash
+python scripts/classer_medias_ai.py --source produits/a_classer --prefix SA --start-number 1
+```
+
+Classer sans IA, uniquement par ordre/nom de fichier :
+
+```bash
+python scripts/classer_medias_ai.py --source produits/a_classer --no-ai
+```
+
+Autoriser la recherche web pendant le classement IA :
+
+```bash
+python scripts/classer_medias_ai.py --source produits/a_classer --web-search
+```
+
