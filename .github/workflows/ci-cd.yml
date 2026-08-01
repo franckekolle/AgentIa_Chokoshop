@@ -85,14 +85,28 @@ jobs:
       - name: Compile Python scripts
         run: python -m compileall scripts
 
+      - name: Check catalog availability
+        id: catalog
+        shell: bash
+        run: |
+          if [[ -f "$CSV_PATH" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "Catalogue absent de GitHub: $CSV_PATH"
+            echo "Validation catalogue ignoree pour ce run."
+          fi
+
       - name: Validate CSV content
+        if: ${{ steps.catalog.outputs.available == 'true' }}
         run: python scripts/validate_catalogue.py --csv "$CSV_PATH" --images-root "$IMAGES_ROOT"
 
       - name: Validate media folders
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.check_media == 'true' }}
+        if: ${{ steps.catalog.outputs.available == 'true' && github.event_name == 'workflow_dispatch' && github.event.inputs.check_media == 'true' }}
         run: python scripts/validate_catalogue.py --csv "$CSV_PATH" --images-root "$IMAGES_ROOT" --check-media
 
       - name: Import dry run
+        if: ${{ steps.catalog.outputs.available == 'true' }}
         run: python scripts/importer_woocommerce.py --csv "$CSV_PATH" --images-root "$IMAGES_ROOT" --dry-run --skip-images --skip-videos
 
   publish:
@@ -121,6 +135,16 @@ jobs:
 
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
+
+      - name: Require catalog for deployment
+        shell: bash
+        run: |
+          if [[ ! -f "$CSV_PATH" ]]; then
+            echo "Catalogue introuvable dans GitHub: $CSV_PATH"
+            echo "Comme data/ est ignore, la publication GitHub ne peut pas acceder a ton CSV local."
+            echo "Lance la publication depuis ton PC, ou ajoute un mecanisme d'artefact/secrets pour fournir le CSV."
+            exit 1
+          fi
 
       - name: Publish products
         shell: bash

@@ -136,6 +136,8 @@ WORDPRESS_USER
 WORDPRESS_APP_PASSWORD
 ```
 
+Note : `data/` et `produits/` sont ignores par Git car ils contiennent le catalogue et les medias locaux. La CI automatique verifie donc toujours le code, et ne valide le catalogue que si le CSV est disponible dans le run GitHub. Pour publier depuis GitHub Actions, il faudra fournir le catalogue et les medias via un mecanisme dedie, ou lancer la publication depuis ton PC.
+
 Créer ou mettre à jour avec images et vidéos dans la description :
 
 ```bash
